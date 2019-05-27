@@ -6,11 +6,10 @@
 # 'jekyll serve'. If you change this file, please restart the server process.
 
 # Site settings
-title: The Guy
+title: live and code
 email: wangkangfei@yeah.net
-description:  Write an awesome description for your new site here. You can edit this
-              line in _config.yml. It will appear in your document head meta (for
-              Google search results) and in your feed.xml site description.
+description:  I'm an android developer working in Beijing, China. I love open source and I'm making my best effort to learn android developing, 
+                I hope to become a senior developer one day. If you have any questions, don't hesitate to contact me.
 baseurl: "" # the subpath of your site, e.g. /blog
 url: "http://yourdomain.com" # the base hostname & protocol for your site
 twitter_username: boomstack

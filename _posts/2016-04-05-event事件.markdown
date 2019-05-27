@@ -1,0 +1,356 @@
+---
+
+layout: post
+title:  "Android touch事件分发机制"
+date:   2016-04-05 20:45:35 +0800
+categories: Android
+
+---
+
+# Android event dispatch mechanism
+
+关于Android事件分发机制网上的教程很多，大多数都是老手写的，一些细节新手并不理解，这篇博客就是从我这个新手的角度来写的，应该比较好理解。新手村的村民们，嘎巴跌↖(^ω^)↗
+
+总的来说，Android的事件分发都是针对View的，但是要知道，直接继承自View的类分为两类，一类是诸如TextView、SurfaceView的“单一”View，说是单一是因为这些view不可以嵌套其他view，另一类就是ViewGroup，可以嵌套其他的view，常用的Linearlayout、Framelayout、AdapterView就是从ViewGroup直接继承过来的。其实原理都是一样的，因为都是继承自View，只不过ViewGroup加入了事件的拦截与childview的处理，这篇博客就分为两部分描述事件的分发
+
+### “单一”view的事件分发
+
+先看一个demo，布局中加入一个普通的Button，注册onTouchListener和onClickListener：
+
+#### demo-01
+
+```
+ btn.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                System.out.println("hola: onTouch executed! action is " + event.getAction());
+                return false;
+            }
+        });
+        btn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                System.out.println("hola: onClick executed!");
+            }
+        });
+```
+点击一下按钮，执行结果：
+```
+System.out: hola: onTouch executed! action is 0
+System.out: hola: onTouch executed! action is 1
+System.out: hola: onClick executed!
+```
+注意，event.getAction()返回的0为按下，1为离开，2为移动，都是手指在屏幕上的“event”。可以看到率先回调的是onTouch方法，其次是onClick。注意onTouch返回的是false，先立个flag，返回true的话结果不同，待会再说。
+
+这里先说一个事实，view事件的分发都是从dispatchTouchEvent开始的，也是从这个方法结束的（返回true就是结束），至于原因，以后补充，不在这篇博客范围内。
+
+Button类没有复写dispatchTouchEvent方法，他的直接父类TextView也没有复写，TextView的直接父类就是View了，最顶层了，那么Button的dispatchTouchEvent就会执行View的这个方法。
+
+```
+/**
+     * Pass the touch screen motion event down to the target view, or this
+     * view if it is the target.
+     *
+     * @param event The motion event to be dispatched.
+     * @return True if the event was handled by the view, false otherwise.
+     */
+    public boolean dispatchTouchEvent(MotionEvent event) {
+        ............
+        boolean result = false;
+        .............
+        if (onFilterTouchEventForSecurity(event)) {
+            //noinspection SimplifiableIfStatement
+            ListenerInfo li = mListenerInfo;
+            if (li != null && li.mOnTouchListener != null
+                    && (mViewFlags & ENABLED_MASK) == ENABLED
+                    && li.mOnTouchListener.onTouch(this, event)) {
+                result = true;
+            }
+
+            if (!result && onTouchEvent(event)) {
+                result = true;
+            }
+        }
+		.............
+        return result;
+    }
+```
+这是6.0系统的源码，加入了一个安全的检查，老一点的版本跟这个不太一样，但是逻辑是相同的。以上是最核心的部分，注释写的很清楚，这个方法有两层含义，一是从上往下传递触屏事件到目标view，这是针对ViewGroup的，二是对于“单一”view，自己就是目标view。大体的逻辑上来看，是正常的处理触屏事件的话result都会是true，触屏事件总会结束的。
+
+来看第一个if条件，会检查三项：
+（1）onTouchListener是否是null
+（2）当前view是否是enable状态
+（3）回调的onTouch方法是否返回true
+条件（1）被满足的话，就是注册监听即可，条件（2）是view是enable就行，大多view默认是enable的，关键是第三个条件，调用onTouch的返回值。在demo-01中，返回值是false，那么result的值还是原来的false，注意，这里已经执行了onTouch回调方法，自己在onTouch中定义的逻辑都被执行了，在demo-01中就是那句输出，只不过返回值是false而已。
+注意，要是没有注册TouchListener的话，条件（1）就不满足，onTouch回调根本不会执行，更别提返回值是true还是false了，直接进入下一个if。
+
+跳出这个if进入下一个if，可以看到只有result是false才会执行onTouchEvent这个方法（Java中的&&运算是这样的，如果第一个语句为false第二个语句就不会执行），demo-01就会去执行onTouchEvent方法：
+
+这个方法挺长的，只贴我们最关心的部分：
+```
+ if (((viewFlags & CLICKABLE) == CLICKABLE ||
+                (viewFlags & LONG_CLICKABLE) == LONG_CLICKABLE) ||
+                (viewFlags & CONTEXT_CLICKABLE) == CONTEXT_CLICKABLE) {
+            switch (action) {
+                case MotionEvent.ACTION_UP:
+                  ..................
+
+                        if (!mHasPerformedLongPress && !mIgnoreNextUpEvent) {
+                            // This is a tap, so remove the longpress check
+                            removeLongPressCallback();
+
+                            // Only perform take click actions if we were in the pressed state
+                            if (!focusTaken) {
+                                // Use a Runnable and post this rather than calling
+                                // performClick directly. This lets other visual state
+                                // of the view update before click actions start.
+                                if (mPerformClick == null) {
+                                    mPerformClick = new PerformClick();
+                                }
+                                if (!post(mPerformClick)) {
+                                    performClick();
+                                }
+                            }
+                        }
+
+                       ....................
+
+                case MotionEvent.ACTION_DOWN:
+                    ...............
+                case MotionEvent.ACTION_CANCEL:
+                    .............
+
+                case MotionEvent.ACTION_MOVE:
+                   ..............
+            }
+
+            return true;
+```
+如果进入到这个if条件就说明这是一个“正常的”触屏事件，一般情况下都会进入，执行完后都会返回true；返回true后，dispatchTouchEvent中的result被置为true，dispatchTouchEvent返回true，分发结束。
+
+那么就来看看进入到这个if后的执行，它会根据不同的触屏事件进行不同的处理，注意，这是系统调用的，并非我们自定义的，我们自定义的话只要回调onTouch并且返回true，就不会调用系统的onTouchEvent方法了，所以平时开发时看到的自定义触屏事件都是回调的onTouch方法，不过我们当然可以自定义一个View，复写onTouchEvent方法~
+
+在demo-01中还有click事件的处理，从上边的源码可以猜出来，他是在触屏的Action_UP事件中执行的，即performClick（）方法，是不是呢，看源码：
+```
+/**
+     * Call this view's OnClickListener, if it is defined.  Performs all normal
+     * actions associated with clicking: reporting accessibility event, playing
+     * a sound, etc.
+     *
+     * @return True there was an assigned OnClickListener that was called, false
+     *         otherwise is returned.
+     */
+    public boolean performClick() {
+        final boolean result;
+        final ListenerInfo li = mListenerInfo;
+        if (li != null && li.mOnClickListener != null) {
+            playSoundEffect(SoundEffectConstants.CLICK);
+            li.mOnClickListener.onClick(this);
+            result = true;
+        } else {
+            result = false;
+        }
+
+        sendAccessibilityEvent(AccessibilityEvent.TYPE_VIEW_CLICKED);
+        return result;
+    }
+```
+可以看到，跟onTouch是类似的，会回调onClick方法。
+
+至此，demo-01的结果就可以解释了，如果改一下，让onTouch返回true呢？由于dispatchTouchEvent中的result被置为true；onTouchEvent不会执行，performClick更不会执行，onClick没有回调。
+所以输出是这样的：
+```
+System.out: hola: onTouch executed! action is 0
+System.out: hola: onTouch executed! action is 1
+```
+好，至此“单一”view的分发结束了。
+
+### ViewGroup的事件分发
+开头写到，ViewGroup的分发跟“单一”view的分发是类似的，只是多了事件拦截和子view的处理。
+#### demo-02 ViewGroup事件拦截
+首先自定义一个layout继承自LinearLayout
+```
+public class MyLayout extends LinearLayout {
+    public MyLayout(Context context, AttributeSet attrs) {
+        super(context, attrs);
+    }
+    @Override
+    public boolean onInterceptTouchEvent(MotionEvent ev) {
+        return true;
+    }
+}
+```
+返回的true，就是拦截MyLayout以下的（这里“以下”指视图树的层级结构，是MyLayout的子树都是“以下”）所有触屏事件，原理后面再说
+布局文件，MyLayout中放了两个按钮
+```
+<?xml version="1.0" encoding="utf-8"?>
+<com.ethan.dispatchtest.MyLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/ml"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <Button
+        android:id="@+id/btn01"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="btn - 01" />
+
+    <Button
+        android:id="@+id/btn02"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="btn - 02" />
+
+</com.ethan.dispatchtest.MyLayout>
+```
+注册监听：
+```
+        ml.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                System.out.println("hello: layout onTouch executed! "+event.getAction());
+                return false;
+            }
+        });
+        ml.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                System.out.println("hello: layout onClick executed! ");
+
+            }
+        });
+        btn_01.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                System.out.println("hello: button1 onTouch executed! ");
+                return false;
+            }
+        });
+        btn_01.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                System.out.println("hello: button1 onClick executed! ");
+
+            }
+        });
+        btn_02.setOnTouchListener(new View.OnTouchListener() {
+            @Override
+            public boolean onTouch(View v, MotionEvent event) {
+                System.out.println("hello: button2 onTouch executed! ");
+                return false;
+            }
+        });
+        btn_02.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                System.out.println("hello: button2 onClick executed! ");
+
+            }
+        });
+```
+此时不论点击layout还是button执行结果都为：
+```
+System.out: hello: layout onTouch executed! 0
+System.out: hello: layout onTouch executed! 1
+System.out: hello: layout onClick executed! 
+```
+可见，MyLayout以下的触屏事件都被屏蔽掉了，如果MyLayout中的onInterceptTouchEvent返回false，将会有以下执行结果：
+```
+#点击按钮1
+System.out: hello: button1 onTouch executed! 
+System.out: hello: button1 onTouch executed! 
+System.out: hello: button1 onClick executed! 
+#点击按钮2
+System.out: hello: button2 onTouch executed! 
+System.out: hello: button2 onTouch executed! 
+System.out: hello: button2 onClick executed! 
+#点击空白处（MyLayout）
+System.out: hello: layout onTouch executed! 0
+System.out: hello: layout onTouch executed! 1
+System.out: hello: layout onClick executed! 
+```
+可见，MyLayout以下的触屏没有被屏蔽。
+
+ViewGroup作为布局视图的直接父类，它复写了View类的dispatchTouchEvent方法，布局视图要是没有复写这个方法的话，都会执行ViewGroup的dispatchTouchEvent方法，这个方法巨长，还是只挑重点：
+```
+ @Override
+    public boolean dispatchTouchEvent(MotionEvent ev) {
+        ...............
+        boolean handled = false;
+        if (onFilterTouchEventForSecurity(ev)) {
+           ....................
+            if (actionMasked == MotionEvent.ACTION_DOWN
+                    || mFirstTouchTarget != null) {
+                final boolean disallowIntercept = (mGroupFlags & FLAG_DISALLOW_INTERCEPT) != 0;
+                if (!disallowIntercept) {
+                    intercepted = onInterceptTouchEvent(ev);
+                    ev.setAction(action); // restore action in case it was changed
+                } else {
+                    intercepted = false;
+                }
+            } else {
+                // There are no touch targets and this action is not an initial down
+                // so this view group continues to intercept touches.
+                intercepted = true;
+            }
+
+            // If intercepted, start normal event dispatch. Also if there is already
+            // a view that is handling the gesture, do normal event dispatch.
+            if (intercepted || mFirstTouchTarget != null) {
+                ev.setTargetAccessibilityFocus(false);
+            }
+            ...............
+            if (!canceled && !intercepted) {
+					...........
+                        final View[] children = mChildren;
+                        for (int i = childrenCount - 1; i >= 0; i--) {
+	                         ...............
+                            if (dispatchTransformedTouchEvent(ev, false, child, idBitsToAssign)) {
+			                 ............
+        return handled;
+    }
+
+```
+截取的这一段可以看出大体的逻辑，首先有个安全的检测，如果安全则进入if语句块
+```
+intercepted = onInterceptTouchEvent(ev);
+```
+这一句获取触屏事件是否拦截，默认的是不拦截的，这很符合常理，为什么平白无故的要去拦截触屏呢。以下是ViewGroup的onInterceptTouchEvent方法：
+```
+public boolean onInterceptTouchEvent(MotionEvent ev) {
+        return false;
+    }
+```
+```
+if (!canceled && !intercepted) 
+```
+这一句判断事件是否取消和是否中断，都没有就进入这个if块，可以看到用的for循环来遍历每个子view，每遍历到一个子view就执行dispatchTransformedTouchEvent方法，源码：
+```
+ /**
+     * Transforms a motion event into the coordinate space of a particular child view,
+     * filters out irrelevant pointer ids, and overrides its action if necessary.
+     * If child is null, assumes the MotionEvent will be sent to this ViewGroup instead.
+     */
+    private boolean dispatchTransformedTouchEvent(MotionEvent event, boolean cancel,
+            View child, int desiredPointerIdBits) {
+        final boolean handled;
+
+        // Canceling motions is a special case.  We don't need to perform any transformations
+        // or filtering.  The important part is the action, not the contents.
+        final int oldAction = event.getAction();
+        if (cancel || oldAction == MotionEvent.ACTION_CANCEL) {
+            event.setAction(MotionEvent.ACTION_CANCEL);
+            if (child == null) {
+                handled = super.dispatchTouchEvent(event);
+            } else {
+                handled = child.dispatchTouchEvent(event);
+            }
+            event.setAction(oldAction);
+            return handled;
+        }
+        ...............
+```
+可以看到，执行的是子view的dispatchTouchEvent方法，这个子view可以是ViewGroup，也可以是“单一”view，就这样从上往下依次分发事件，每个view的dispatchTouchEvent都返回true的话，整个触屏事件才会结束。
+下面盗用郭神的一幅图总结一下，懒得画了：
+![总结](http://img.blog.csdn.net/20160309162141756)
