@@ -1,0 +1,75 @@
+---
+layout: post
+title:  "Java类型转换优先顺序"
+date:   2016-03-07 11:49:45 +0800
+categories: Java
+---
+Java中经常碰到两个不同类型的基本类型数据进行运算，当没有强制类型转化时，它们之间总会有一个标准去衡量最终的计算结果是什么类型的吧，下面以一个简单的例子看看默认的优先顺序：
+```java
+public class Main {
+	public static void main(String[] args) {
+		byte by = 2;
+		short sh = 4;
+		char ch = 'a';
+		int in = 8;
+		long lo = 9;
+		float fl = 10.7f;
+		double dou = 34.98;
+		boolean boo = true;
+		System.out.println("byte+byte: " + getType(by + by));
+		System.out.println("short+short: " + getType(sh + sh));
+		System.out.println("char+char: " + getType(ch + ch));
+		System.out.println("byte+short: " + getType(by + sh));
+		System.out.println("byte+char: " + getType(by + ch));
+		System.out.println("short+char: " + getType(sh + ch));
+		System.out.println("byte+int: " + getType(by + in));
+		System.out.println("short+int: " + getType(sh + in));
+		System.out.println("char+int: " + getType(ch + in));
+		System.out.println("int+long: " + getType(in + lo));
+		System.out.println("int+float: " + getType(in + fl));
+		System.out.println("int+double: " + getType(in + dou));
+		System.out.println("long+float: " + getType(lo + fl));
+		System.out.println("float+double: " + getType(fl + dou));
+		System.out.println("long+double: " + getType(lo + dou));
+		System.out.println("boolean: " + getType(boo));
+	}
+
+	public static String getType(Object o) {
+		return o.getClass().getSimpleName().toString();
+	}
+}
+```
+执行结果为：
+```
+byte+byte: Integer
+short+short: Integer
+char+char: Integer
+byte+short: Integer
+byte+char: Integer
+short+char: Integer
+byte+int: Integer
+short+int: Integer
+char+int: Integer
+int+long: Long
+int+float: Float
+int+double: Double
+long+float: Float
+float+double: Double
+long+double: Double
+boolean: Boolean
+```
+很清楚啦，byte、short、char是一个级别的，它们之间的运算都会转换为int类型，注意，自己跟自己运算也会转为int类型。int之后从小到大依次为：long、float、double。至于boolean，他是个比较特殊的类型，官方文档也给的模棱两可：
+```
+boolean: The boolean data type has only two possible values: true and false. Use this data type for simple flags that track true/false conditions. This data type represents one bit of information, but its "size" isn't something that's precisely defined.
+```
+它的功能是一个bit能实现的，但是他的存储空间没有明确定义，更别提跟别的类型进行运算了。
+一个表格总结Java基本类型的优先顺序：
+
+
+操作数1	| 操作数2	| 运算结果
+byte short char    	| byte short char	| int
+byte short char	  | Int	| Int
+byte short char int	  | Long	| Long
+byte short char int long	| Float	| Float
+byte short char int long double	| Double	| Double
+
