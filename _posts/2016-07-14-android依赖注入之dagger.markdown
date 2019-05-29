@@ -15,7 +15,7 @@ categories: Java
 当然就是Dagger啦，跟Butter knife一样都是JakeWharton大神的作品。
 
 Dagger使用java的注解，在预编译阶段就初始化了对象。Dagger的使用结构如下：
-![这里写图片描述](http://img.blog.csdn.net/20160315184924149)
+![能显示了吧](https://raw.githubusercontent.com/boomstack/boomstack.github.io/master/assets/all/headshot.jpg)
 在下面的例子中，被注入者就是MainActivity，容器就是以“Module”结尾的类，而注入者就是实际的Teacher、Student类了。
 先看被注入者Teacher：
 ```
