@@ -186,4 +186,4 @@ public class ServiceActivity extends AppCompatActivity implements MyService.OnSe
 注：HolaPrint是我自己写的一个类，用于输出的，不必关心。
 执行结果：
 
-![这里写图片描述](http://img.blog.csdn.net/20170310003822334?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZXRoYW5ob2xh/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+![这里写图片描述](https://github.com/boomstack/boomstack.github.io/blob/master/assets/all/nbmndsfas454342.png?raw=true)
