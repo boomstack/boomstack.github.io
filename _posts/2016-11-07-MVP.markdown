@@ -1,0 +1,131 @@
+---
+
+layout: post 
+
+title: "MVP模式在实际开发中的应用" 
+
+date: 2016-11-07 15:16:41 +0800 
+
+categories: Android
+
+---
+  
+业务逻辑写的越来越多，越来越复杂，将业务逻辑都放到Activity中写当时可能觉得很爽，因为写的随意，写的速度也快，但是后期维护很困难，交接项目的成本也很高。MVP模式应运而生。
+
+## MVP原理  
+M指代model，用于存放数据的模型，用于Json解析、缓存等。
+V指代View，通常意义上的Android视图，由于静态的view功能太少，需要Activity控制，这里将Activity视为View，进行视图的刷新、可见性等的控制。
+P指代Presenter，任命者，去处理各种业务上的逻辑，处理完成后通知View，View根据返回结果更新UI。
+
+本质上来说，MVP模式是通过接口层将UI和业务逻辑分离。UI不关心具体的业务逻辑，业务逻辑不关心UI怎么显示。一个MVP的实例可以不含有model，但是一定会有view和presenter。
+
+## 实例
+本例模拟从网络抓取数据的场景
+工程目录如下：
+
+![Paste_Image.png](https://raw.githubusercontent.com/boomstack/boomstack.github.io/master/assets/all/dsf2w34r3wrdf.png)
+
+### BaseView.java
+```java
+public interface BaseView<T> {    
+    void setPresenter(T t);
+}
+```
+### BasePresenter.java
+```java
+public interface BasePresenter {
+   void destroy();
+}
+```
+以上两个类是基础的类，将来app里的所有V和P都可以继承它们。
+
+### IMainView.java
+```java
+public interface IMainView extends BaseView<IMainPresenter>{    
+        void showErrorMsg(String str);      
+        void showNetResult(InfoModel model);
+}
+```
+这个接口定义了UI层需要处理的两个动作，显示错误信息和显示请求结果。
+
+### IMainPresenter
+```java
+public interface IMainPresenter extends BasePresenter{    
+    void getInfoFromNet(int who);
+}
+```
+这个接口定义了业务逻辑层需要处理的逻辑，从网络获取信息。
+
+```java
+public class MainActivity extends AppCompatActivity implements IMainView {
+
+​
+   private IMainPresenter mPresenter;
+​
+   @Override
+   protected void onCreate(Bundle savedInstanceState) {
+       super.onCreate(savedInstanceState);
+       setContentView(R.layout.activity_main);
+       //初始化presenter
+       mPresenter = new MainPresenter(this);
+       mPresenter.getInfoFromNet(1);
+   }
+​
+   @Override
+   public void showErrorMsg(String str) {
+       Toast.makeText(this, str, Toast.LENGTH_SHORT).show();
+   }
+​
+   @Override
+   public void showNetResult(InfoModel model) {
+       Toast.makeText(this, model.result, Toast.LENGTH_SHORT).show();
+   }
+​
+   @Override
+   public void setPresenter(IMainPresenter iMainPresenter) {
+       this.mPresenter = iMainPresenter;
+   }
+​
+   @Override
+   protected void onDestroy() {
+       super.onDestroy();
+       //presenter回收
+       if (mPresenter != null) {
+           mPresenter.destroy();
+       }
+   }
+}
+```
+### MainPresenter.java
+```java
+public class MainPresenter implements IMainPresenter {
+   IMainView mainView;
+​
+   public MainPresenter(IMainView mainView) {
+       this.mainView = mainView;
+       this.mainView.setPresenter(this);
+   }
+​
+   @Override
+   public void getInfoFromNet(int who) {
+       System.out.println("hola " + Thread.currentThread().getId());
+       if (who == 1) {
+           InfoModel model = new InfoModel();
+           model.code = 0;
+           model.msg = "success";
+           model.result = "Got information from internet.";
+           mainView.showNetResult(model);
+       } else {
+           mainView.showErrorMsg("error here.");
+       }
+​
+   }
+​
+   @Override
+   public void destroy() {
+       //进行必要资源回收
+       
+   }
+}
+```
+源码地址：https://github.com/boomstack/TestMVP

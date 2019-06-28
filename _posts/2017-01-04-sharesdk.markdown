@@ -1,0 +1,111 @@
+---
+
+layout: post 
+
+title: "实现海外社交平台（Facebook、Twitter等）的分享" 
+
+date: 2017-01-03 20:11:27 +0800 
+
+categories: Android
+
+---
+
+海外的社交平台没有像Mob一样的集成sdk，各有各的sdk，掉进几次坑里，在此记录一下。三个平台都可以同时分享图片、链接、文字、
+
+## Facebook
+
+facebook分享的图片需是来自网络的图片url，sdk注释：
+
+```java
+
+/**
+
+* Set the URL of a picture to attach to this content.
+
+* @param imageUrl The network URL of an image.
+
+* @return The builder.
+
+*/
+
+public Builder setImageUrl(@Nullable final Uri imageUrl) {
+
+this.imageUrl = imageUrl;
+
+return this;
+
+}
+
+```
+
+facebook需要分享标题
+
+```java
+
+/**
+
+* Set the contentTitle to display for this link.
+
+* @param contentTitle The link contentTitle.
+
+* @return The builder.
+
+*/
+
+public Builder setContentTitle(@Nullable final String contentTitle) {
+
+this.contentTitle = contentTitle;
+
+return this;
+
+}
+
+```
+
+如果不设置title或者设置空串，会显示默认标题，此标题很诡异，不知道来源在哪里，最好在服务端下发title字段
+
+## Twitter
+
+Twitter的分享图片似乎只能是手机本地的图片uri，如果加载来自网络的图片会报“Image could not be loaded.” 本机的图片是图片的绝对路径，要经过Uri的转化。也可以解析base64编码转为本地file，最终都是一个目的，拿到图片绝对路径。
+
+```java
+
+intent = new TweetComposer.Builder(fromActivity)
+
+.text(shareText + " ")//断句空格
+
+.url(url)
+
+.image(mImageUri)
+
+.createIntent();
+
+```
+
+## WhatsApp
+
+旧版的WhatsApp不支持图片和文字共同分享，新版的可以按照如下来分享
+
+```java
+
+Uri imageUri = Uri.parse(pictureFile.getAbsolutePath());
+
+Intent shareIntent = new Intent();
+
+shareIntent.setAction(Intent.ACTION_SEND);
+
+//Target whatsapp:
+
+shareIntent.setPackage("com.whatsapp");
+
+//Add text and then Image URI
+
+shareIntent.putExtra(Intent.EXTRA_TEXT, picture_text);
+
+shareIntent.putExtra(Intent.EXTRA_STREAM, imageUri);
+
+shareIntent.setType("image/jpeg");
+
+shareIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+
+```
