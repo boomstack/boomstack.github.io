@@ -1,0 +1,86 @@
+---
+
+layout: post 
+
+title: "WebView与native互访的方法" 
+
+date: 2016-10-22 10:22:11 +0800 
+
+categories: Android
+
+---
+
+本博客解决的问题是Android本地方法和webview中js方法交互，方法一是使用的是Android自身js注解，方法二是开源库jockeyjs。
+### 方法一：js注解
+先上js脚本（代码来自网络）：
+```html
+<html>
+<head>
+<meta http-equiv="Content-Type"    content="text/html;charset=gb2312">
+<script type="text/javascript">
+//java代码调用js方法
+function javacalljs(){
+    document.getElementById("content").innerHTML +=   
+         "<br\>java调用了js函数";
+}
+</script>
+</head>
+<body>
+this is my html <br/>
+//js调用java方法,所有js全局对象、函数以及变量均自动成为window对象的成员
+<a onClick="window.wst.jsCallAndroid()">点击调用java代码</a><br/>
+<br/>
+<div id="content">内容显示</div>
+</body>
+</html>
+```
+再看java代码：
+```java
+public class MainActivity extends AppCompatActivity {
+
+    private WebView webView;
+    private Button btn;
+
+    @SuppressLint("SetJavaScriptEnabled")
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        webView = (WebView) findViewById(R.id.webview);
+        btn = (Button) findViewById(R.id.btn_calljs);
+        webView.getSettings().setJavaScriptEnabled(true);
+        webView.loadUrl("file:///android_asset/wst.html");
+        webView.addJavascriptInterface(this, "wst");
+        btn.setOnClickListener(new View.OnClickListener() {
+            @Override
+            public void onClick(View v) {
+                webView.loadUrl("javascript:javacalljs()");
+            }
+        });
+    }
+
+    @JavascriptInterface
+    public void jsCallAndroid() {
+        Toast.makeText(MainActivity.this, "js call android", Toast.LENGTH_LONG).show();
+    }
+}
+```
+webview加载了assets目录下的HTML文件，关键的是addJavaScriptInterface方法，函数原型为：
+```java
+ /* @param object the Java object to inject into this WebView's JavaScript
+ *               context. Null values are ignored.
+ * @param name the name used to expose the object in JavaScript
+ */
+public void addJavascriptInterface(Object object, String name) {
+    checkThread();
+    mProvider.addJavascriptInterface(object, name);
+}
+```
+注释说第一个参数是注入到webview的java对象，本例中把当前类MainActivity实例作为注入对象，并向js暴露名为“wst”，所以js脚本中的window.wst指的是MainActivity对象，加入了JavaScriptInterface注解的方法，就可以被js对象调用了。这就完成了js调用Android本地方法。Android调用js时，只需loadUrl即可。
+### 方法二: JokeyJS开源库
+时间原因，先说明下基本原理，有空再更新使用方法，网上也有一些例子但不是很多。  
+java调js： 
+本质上是用webview的loadUrl方法，与方法一类似。  
+js调java：  
+JokeyJS实现了自己的webviewclient实例，在webview加载url之前把url拦截，如果是jokey协议的话不走默认的loadUrl方法，而是调用注册的jokeyhandler方法去调用java方法。
+
