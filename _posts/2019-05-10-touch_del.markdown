@@ -1,0 +1,218 @@
+---
+
+layout: post 
+
+title: "Android鲜为人知的TouchDelegate" 
+
+date: 2019-05-10 23:09:11 +0800 
+
+categories: Android
+
+---
+
+我们都知道Android触屏事件是在视图树中传递的，ViewGroup决定是否拦截触屏事件，如果拦截就自己处理触屏事件，如果不拦截就传递给子视图，子视图如果是ViewGroup会经历同样的逻辑，子视图如果是View（这里特指不能包含子视图的View）就只能在自己的onTouch或者onTouchEvent中处理，并返回true或者false来告知父视图处理完没有。
+
+子View处理过程中有onTouch和onTouchEvent两个方法，它们是有先后顺序的，如下代码，在View.java的dispatchTouchEvent方法中：
+
+```java
+            if (li != null && li.mOnTouchListener != null
+                    && (mViewFlags & ENABLED_MASK) == ENABLED
+                    && li.mOnTouchListener.onTouch(this, event)) {
+                result = true;
+            }
+
+            if (!result && onTouchEvent(event)) {
+                result = true;
+            }
+```
+如果继承自View的View设置了onTouchListener，则先会执行onTouch方法，如果返回true，上述代码中result就是true，onTouchEvent就不会执行。如果没有设置onTouchListener，或者设置了但是onTouch返回false了，result就是false，会继续执行onTouchEvent。一般平时开发设置onTouchListener就足够了，来处理自定义View的触摸事件，复杂点onTouch和onTouchEvent都会重写。onTouchEvent方法中有这么一段，就是本文的主角——TouchDelegate：
+
+```java
+        if (mTouchDelegate != null) {
+            if (mTouchDelegate.onTouchEvent(event)) {
+                return true;
+            }
+        }
+```
+可以看到**TouchDelegate相当于在onTouch和onTouchEvent之间插了一脚**，如果TouchDelegate不是null并且它的onTouchEvent返回true了，那么当前View的onTouchEvent就返回true不再执行onTouchEvent后序逻辑。
+由上文可以看到**核心逻辑在于TouchDelegate的onTouchEvent方法**，下面看看TouchDelegate是何方神圣。
+源码来看TouchDelegate逻辑比较简单，除了构造方法就一个方法：onTouchEvent，看来这个类功能还是很局限的，**概括来说，它把对一个控件的触摸事件转移到另一个View上**。
+来看源码，后文将用一个例子来说明：  
+
+构造方法：
+
+```java
+    /**
+     * Constructor
+     *
+     * @param bounds Bounds in local coordinates of the containing view that should be mapped to
+     *        the delegate view
+     * @param delegateView The view that should receive motion events
+     */
+    public TouchDelegate(Rect bounds, View delegateView) {
+        mBounds = bounds;
+
+        mSlop = ViewConfiguration.get(delegateView.getContext()).getScaledTouchSlop();
+        mSlopBounds = new Rect(bounds);
+        mSlopBounds.inset(-mSlop, -mSlop);
+        mDelegateView = delegateView;
+    }
+```
+两个参数，注释说的挺明白：bounds就是委托者的区域，注意是local coordinates，即委托者相对于父视图的坐标。而delegateView就是被委托者对象（有点绕没关系，后问举例子就清楚了）。  
+
+下面是onTouchEvent方法（部分）：
+
+```java
+ public boolean onTouchEvent(MotionEvent event) {
+        int x = (int)event.getX();
+        int y = (int)event.getY();
+        ……
+
+        switch (event.getActionMasked()) {
+            case MotionEvent.ACTION_DOWN:
+            	//判断触摸点是否在指定区域内
+                mDelegateTargeted = mBounds.contains(x, y);
+                sendToDelegate = mDelegateTargeted;
+        ……
+        if (sendToDelegate) {
+            final View delegateView = mDelegateView;
+			……
+            handled = delegateView.dispatchTouchEvent(event);
+        }
+        return handled;
+    }
+```
+首先获取的是当前view相对于父view的坐标，然后在switch中判断当前触屏点是否在构造函数指定的区域内，如果在则后边的if语句就是true，会执行被委托视图的dispatchTouchEvent方法，当然如果触屏点不在指定区域内就返回false，也就是返回到了View的onTOuchEvent中，继续往下执行View的onTouchEvent逻辑。
+
+还是举个例子更清晰。
+
+```java
+public class MainActivity extends AppCompatActivity {
+    private Button btnOrigin;
+    private LinearLayout llTest;
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
+        btnOrigin = findViewById(R.id.button_origin);
+        llTest = findViewById(R.id.fl_test);
+
+		//这里向主线程消息队列放了一个消息，它是在View遍历任务之后执行的，所以能得到控件的真实布局情况
+        btnOrigin.post(new Runnable() {
+            @Override
+            public void run() {
+                //测试点击事件
+                btnOrigin.setOnClickListener(new View.OnClickListener() {
+                    @Override
+                    public void onClick(View v) {
+                        Toast.makeText(MainActivity.this, "11111 clicked", Toast.LENGTH_SHORT).show();
+                    }
+                });
+                Rect delegateArea = new Rect();
+                //获取按钮在父视图中的位置（区域，相对于父视图坐标）
+                btnOrigin.getHitRect(delegateArea);
+                //扩大区域范围，这里向下扩展200像素
+                delegateArea.bottom += 200;
+                //这里画个textview方便看效果
+                TextView testView = new TextView(MainActivity.this);
+                testView.setBackgroundColor(getResources().getColor(R.color.colorAccent));
+                ViewGroup.LayoutParams params = new ViewGroup.LayoutParams(btnOrigin.getWidth(), 200);
+                testView.setLayoutParams(params);
+                testView.setGravity(Gravity.CENTER);
+                testView.setText("Hi");
+                llTest.addView(testView);
+                //新建委托
+                TouchDelegate touchDelegate = new TouchDelegate(delegateArea, btnOrigin);
+                ViewParent parent = btnOrigin.getParent();
+                if (parent instanceof LinearLayout) {
+                    //核心方法：将按钮的touch事件委托给父视图
+                    ((LinearLayout) parent).setTouchDelegate(touchDelegate);
+                }
+            }
+        });
+    }
+}
+```
+说明都在注释里了，基于按钮的布局，并把委托区域在y轴上延伸了200像素，当这个委托区域有触屏事件时，会走到父布局LinearLayout的onTouchEvent方法，然后因为调用了setTouchDelegate，导致该LinearLayout优先执行TouchDelegate里的onTouchEvent方法，而delegateView就是btnOrigin，其实就是执行了btnOrigin的dispatchTouchEvent。所以想想看，这里是不是**把原先的按钮响应触摸的区域变大了**呢？
+
+也把布局文件贴一下：
+```xml
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    tools:context=".MainActivity">
+
+    <androidx.constraintlayout.widget.Guideline
+        android:id="@+id/guideline"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        app:layout_constraintGuide_begin="74dp" />
+
+
+    <LinearLayout
+        android:id="@+id/fl_test"
+        android:layout_width="match_parent"
+        android:layout_height="300dp"
+        android:layout_marginStart="8dp"
+        android:layout_marginLeft="8dp"
+        android:layout_marginEnd="8dp"
+        android:layout_marginRight="8dp"
+        android:layout_marginBottom="8dp"
+        android:background="@color/colorPrimary"
+        android:orientation="vertical"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintHorizontal_bias="0.0"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="@+id/guideline"
+        app:layout_constraintVertical_bias="0.945">
+
+        <Button
+            android:id="@+id/button_origin"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="1111111"
+            app:layout_constraintStart_toStartOf="parent" />
+
+    </LinearLayout>
+</androidx.constraintlayout.widget.ConstraintLayout>
+```
+执行效果：点击如图按钮下方的红色区域时也会响应按钮的click事件。
+![在这里插入图片描述](https://raw.githubusercontent.com/boomstack/boomstack.github.io/master/assets/all/sdfa892340932lk4we3423o.png)  
+思考  
+这个类有啥用呢？上述的例子是一个应用，把一个控件的触摸区域变大了，这个在实际中也是有意义的，比如一个界面里有个小小的按钮，但是它要响应点击事件，就可以用这个方法放大点击区域。
+
+能缩小点击范围吗？目前来看不能，这是因为，如果设置的mBounds比被委托视图还小，那么TouchDelegate中的onTouchEvent有一句mBounds.contains(x,y)是不成立的，也就不会执行被委托对象的dispatchTouchEvent方法，但是会执行原本的触摸方法。
+
+缺陷  
+**Android 9以下是有很大的bug的，Android9才修复**，看来这个东西很少有人用啊。。。
+来看Android8的代码，这是TouchDelegate的onTouchEvent中那个switch语句（上述文章是基于Android9分析的，没啥问题）
+
+```java
+    switch (event.getAction()) {
+    case MotionEvent.ACTION_DOWN:
+        Rect bounds = mBounds;
+
+        if (bounds.contains(x, y)) {
+            mDelegateTargeted = true;
+            sendToDelegate = true;
+        }
+        break;
+    case MotionEvent.ACTION_UP:
+    case MotionEvent.ACTION_MOVE:
+        sendToDelegate = mDelegateTargeted;
+        ……   
+    case MotionEvent.ACTION_CANCEL:
+        sendToDelegate = mDelegateTargeted;
+        mDelegateTargeted = false;
+        break;
+```
+看出来啥问题没？如果某一次bounds.contains返回true了，sendToDelegate就是true了，然后只有在CANCEL的时候把mDelegateTargeted赋值为false，下次move事件才会把sendToDelegate置为false，这就有问题，CANCEL并不是每次触屏事件都会触发的，如果一直不触发CANCEL，那么**sendToDelegate一直是true**。**这就导致触摸父视图任意地方都会触发被委托视图的dispatchTouchEvent方法，而父视图的触摸消息永远也得不到响应**！
+ 
+
+总之，如果要用这个方法，就把Android 9对应的文件拷出来，新建子类，继承TouchDelegate，好在这个类比较简单，这么做代价不大。
