@@ -8,7 +8,7 @@
 # Site settings
 title: live and code
 email: wangkangfei@yeah.net
-description:  I'm an android developer working in Beijing, China. I love open source and I'm making my best effort to learn android developing, 
+description:  I'm an android developer working in Beijing, China. I'm making my best effort to learn android developing, 
                 I hope to become a senior developer one day. If you have any questions, don't hesitate to contact me.
 baseurl: "" # the subpath of your site, e.g. /blog
 url: "http://yourdomain.com" # the base hostname & protocol for your site
