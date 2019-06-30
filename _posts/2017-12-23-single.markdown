@@ -1,0 +1,107 @@
+---
+
+layout: post 
+
+title: "RxJava+Retrofit+MVP实践" 
+
+date: 2017-07-10 15:09:22 +0800 
+
+categories: Android
+
+---
+
+在Android开发中，单例还是很有用的，一般在上层业务逻辑开发中使用，笔者不推荐在偏底层且跟业务相关的SDK中使用单例，比如网络连接、图片加载，这是因为大型APP会分出许多模块、频道，一旦底层SDK使用单例，上层所有业务都是使用同一个实例，各个模块很难进行个性化使用。
+
+下面来看典型的几种单例实现方式。
+
+### 1.非线程安全的方式
+```java
+//非线程安全
+public class TestSingle {
+    //SingleInstance为测试类
+    private static SingleInstance instance;
+    public static SingleInstance getInstance() {
+        if(instance == null) {                //1
+            return new SingleInstance();      //2  
+        }
+        return instance;
+    }
+}
+```
+
+分析之前先补充一点，关于对象初始化的步骤（伪代码）：
+```c
+mem = alloc(); //step1：分配内存
+initInstance(); //step2：初始化内存
+instance = mem; //step3：instance指针（栈中）指向刚分配的内存（堆中）地址
+```
+
+首先JVM会划分一块堆中的内存，用于存放新建的实例，然后初始化该内存中的数据，最后把这块内存地址赋值给instance变量。这里的Instance变量即代码中定义的变量名。但是问题来了，step2和step3有可能会被编译器优化，进行代码重排序，即step3先于step2执行，此时会先把内存地址赋值给变量名，然后再初始化内存。
+
+之所以说是非线程安全的，是因为在多个线程执行过程中（Note：单线程不存在线程安全这个话题，单线程一定是安全的），1和2的执行顺序是不一定的，第一种情况是，假设线程A执行到1，线程B执行到2，但是2还没执行完毕，此时instance还是null，线程A依然会执行2，这种情况下线程A新建一个实例，线程B新建一个实例，两线程拥有不同的实例，违反单例的初衷。第二种情况是，线程A马上要执行1，而线程B执行完上述的step3但没执行step2，此时instance已经不是null了，但是对象还没初始化完毕，此时线程A调用instance相关方法会异常。
+
+### 2. 改进1：synchronized修饰方法
+```java
+public class TestSingle {
+    //SingleInstance为测试类
+    private static SingleInstance instance;
+    public synchronized static SingleInstance getInstance() {
+        if(instance == null) {
+            return new SingleInstance();
+        }
+        return instance;
+    }
+}
+```
+
+仅仅把getInstance用同步符号修饰即可，这是比较暴力的方式，解决问题了，但是效率不高，原因在于如果有大量线程并发访问getInstance方法，需要获得TestSingle.class这个对象的锁，因为一次只能有一个线程获得该锁，其他线程只能处于BLOCKED状态。
+
+### 3. 改进2：双重检查锁定
+```java
+public class TestSingle {
+    //SingleInstance为测试类
+    private volatile static SingleInstance instance;
+    
+    public static SingleInstance getInstance() {
+        if(instance == null) {                    //1
+            synchronized (TestSingle.class) {
+                if(instance ==null) {    //这里避免了上述新建两个实例的情况
+                    instance = new SingleInstance();
+                }
+            }
+        }
+        return instance;
+    }
+}
+```
+注意：必须用volatile修饰instance
+
+上述代码1处避免了改进1方式中的同步，其他线程不必获取TestSingle.class的锁，进而不必进入BLOCK状态，而且判断为空后加上同步代码块，使得只能有一个线程对实例进行初始化操作，进而保证仅有一个实例。此时如果不加volatile修饰，如上所述，step2和step3有可能进行代码重排序，instance被赋值一个内存区域，但是对象还没初始化，此时instance已非null，依然会有上述非线程安全的第二种情况。
+
+而volatile的作用在于禁止某些情况下的重排序，所有禁止重排情景如下：
+!["hhh"]()
+
+本例属于先写后读的场景，即上述step3赋值为写instance，其他线程读，所以用volatile修饰instance后step2和step3不会重排序，所以执行完instance = new SingleInstance();以后instance对象一定初始化完毕了。其他线程再去读也就没有异常了。
+
+此外在同步块中又加了一层判空，这是防止非线程安全例子中的第一种情况，即许多线程执行到1，然后进入BLOCK状态，等新建对象的那个线程执行完毕后，这些线程也会依次进入同步块中，再次判空就防止多次新建实例。
+
+4.改进3：利用类的初始化时的<clinit>()方法
+java的类加载过程大致如下：加载（把.class文件装载到内存）--> 链接（验证class、解析符号常亮等）--> 初始化（执行类构造器<clinit>）
+
+其中第三步类构造器主要操作两个方面:一是初始化类变量，二是执行static代码块，而且JVM保证这个方法在多线程环境下能被正确地加锁同步（详见《深入理解Java虚拟机》第二版226页）
+
+public class TestSingle {
+    //SingleInstance为测试类
+    private static class InstanceHolder {
+        public static SingleInstance instance = new SingleInstance();  //1
+    }
+    public static SingleInstance getInstance() {
+        return InstanceHolder.instance;
+    }
+}
+如上代码中，新建一个静态内部类InstanceHolder，它的作用就在与初始化时执行自己的<clinit>()方法，这里JVM保证线程安全，instance一定是唯一的，此时用户代码还没有执行，用户使用getInstance()方法时一定可以获取到由JVM创建的唯一instance实例。
+
+5.改进4：枚举
+详见《Effective Java》第14条，不再赘述，Java作者认为的最佳单例实现方式。
+
+

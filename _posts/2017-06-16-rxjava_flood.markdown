@@ -99,5 +99,5 @@ RxUtils.clickView(btnClick/*your view*/)
                 });
 ```
 主要是使用的rxjava的throttleFirst操作符，它只会放出每个时间段内的第一个对象：
-![这里写图片描述](http://img.blog.csdn.net/20170421144317322?watermark/2/text/aHR0cDovL2Jsb2cuY3Nkbi5uZXQvZXRoYW5ob2xh/font/5a6L5L2T/fontsize/400/fill/I0JBQkFCMA==/dissolve/70/gravity/SouthEast)
+![这里写图片描述](https://github.com/boomstack/boomstack.github.io/blob/master/assets/all/dsfas4534.png?raw=true)
 所以中间的点击事件是被忽略掉的，也就实现了防抖动。
