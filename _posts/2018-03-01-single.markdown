@@ -22,7 +22,7 @@ public class TestSingle {
     private static SingleInstance instance;
     public static SingleInstance getInstance() {
         if(instance == null) {                //1
-            return new SingleInstance();      //2  
+            instance =  new SingleInstance();      //2  
         }
         return instance;
     }
